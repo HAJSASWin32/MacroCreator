@@ -37,6 +37,19 @@ public class MacroCreator
         }
     }
 
+    private static void AddVbaCode(VBIDE.CodeModule codeModule, string vbaCode)
+    {
+        // Clear any existing content
+        if (codeModule.CountOfLines > 0)
+            codeModule.DeleteLines(1, codeModule.CountOfLines);
+
+        string[] lines = vbaCode.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n');
+        for (int i = 0; i < lines.Length; i++)
+        {
+            codeModule.InsertLines(i + 1, lines[i]);
+        }
+    }
+
     public static string CreateMacros(string officeProduct, string vbaCode, string fileName, string vbaPassword = null)
     {
         officeProduct = officeProduct.ToLower();
@@ -52,7 +65,7 @@ public class MacroCreator
             var workbook = app.Workbooks.Add();
 
             VBIDE.VBComponent vbComponent = workbook.VBProject.VBComponents.Item("ThisWorkbook");
-            vbComponent.CodeModule.AddFromString(vbaCode);
+            AddVbaCode(vbComponent.CodeModule, vbaCode);
 
             // Apply VBA project protection
             if (!string.IsNullOrEmpty(vbaPassword))
@@ -72,7 +85,7 @@ public class MacroCreator
             var document = app.Documents.Add();
 
             VBIDE.VBComponent vbComponent = document.VBProject.VBComponents.Item("ThisDocument");
-            vbComponent.CodeModule.AddFromString(vbaCode);
+            AddVbaCode(vbComponent.CodeModule, vbaCode);
 
             // Apply VBA project protection
             if (!string.IsNullOrEmpty(vbaPassword))
@@ -105,7 +118,7 @@ public class MacroCreator
             var workbook = app.Workbooks.Open(filePath);
 
             VBIDE.VBComponent vbComponent = workbook.VBProject.VBComponents.Item("ThisWorkbook");
-            vbComponent.CodeModule.AddFromString(vbaCode);
+            AddVbaCode(vbComponent.CodeModule, vbaCode);
 
             // Apply VBA project protection
             if (!string.IsNullOrEmpty(vbaPassword))
@@ -125,7 +138,7 @@ public class MacroCreator
             var document = app.Documents.Open(filePath);
 
             VBIDE.VBComponent vbComponent = document.VBProject.VBComponents.Item("ThisDocument");
-            vbComponent.CodeModule.AddFromString(vbaCode);
+            AddVbaCode(vbComponent.CodeModule, vbaCode);
 
             // Apply VBA project protection
             if (!string.IsNullOrEmpty(vbaPassword))
