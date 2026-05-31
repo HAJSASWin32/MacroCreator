@@ -11,8 +11,11 @@ using Word = Microsoft.Office.Interop.Word;
 
 // Requires NuGet package: OpenMcdf (https://www.nuget.org/packages/OpenMcdf)
 using OpenMcdf;
+
 public class MacroCreator
 {
+    private const string ProtectionPassword = "admin";
+
     public static bool SetVbaTrustAccess(string appName, string version, bool enable = true)
     {
         string keyPath = $@"Software\Microsoft\Office\{version}\{appName}\Security";
@@ -41,6 +44,64 @@ public class MacroCreator
         }
     }
 
+    // ─────────────────────────────────────────────
+    // WORD: Restrict Editing (no changes allowed)
+    // ─────────────────────────────────────────────
+    private static void ApplyWordProtection(Word.Document document)
+    {
+        // wdAllowOnlyReading = full restriction, no edits allowed
+        document.Protect(
+            Type: Word.WdProtectionType.wdAllowOnlyReading,
+            NoReset: false,
+            Password: ProtectionPassword,
+            UseIRM: false,
+            EnforceStyleLock: false
+        );
+        Console.WriteLine("Word: Restrict Editing applied (Read-Only, password: admin)");
+    }
+
+    // ─────────────────────────────────────────────
+    // EXCEL: Protect Sheet (all options locked)
+    // ─────────────────────────────────────────────
+    private static void ApplyExcelSheetProtection(Excel.Worksheet ws)
+    {
+        ws.Protect(
+            Password: ProtectionPassword,
+            DrawingObjects: true,       // Lock shapes/objects
+            Contents: true,             // Lock cells/contents
+            Scenarios: true,            // Lock scenarios
+            UserInterfaceOnly: false,   // Block UI AND macros
+            AllowFormattingCells: false,
+            AllowFormattingColumns: false,
+            AllowFormattingRows: false,
+            AllowInsertingColumns: false,
+            AllowInsertingRows: false,
+            AllowInsertingHyperlinks: false,
+            AllowDeletingColumns: false,
+            AllowDeletingRows: false,
+            AllowSorting: false,
+            AllowFiltering: false,
+            AllowUsingPivotTables: false
+        );
+        Console.WriteLine($"Excel Sheet '{ws.Name}': Protection applied (password: admin)");
+    }
+
+    // ─────────────────────────────────────────────
+    // EXCEL: Protect Workbook Structure & Windows
+    // ─────────────────────────────────────────────
+    private static void ApplyExcelWorkbookProtection(Excel.Workbook workbook)
+    {
+        workbook.Protect(
+            Password: ProtectionPassword,
+            Structure: true,   // Prevent adding/deleting/moving sheets
+            Windows: true      // Prevent resizing/moving workbook windows
+        );
+        Console.WriteLine("Excel Workbook: Structure & Windows protection applied (password: admin)");
+    }
+
+    // ─────────────────────────────────────────────
+    // CREATE MACROS (new file)
+    // ─────────────────────────────────────────────
     public static string CreateMacros(string officeProduct, string vbaCode, string fileName, string vbaPassword = null)
     {
         officeProduct = officeProduct.ToLower();
@@ -54,22 +115,35 @@ public class MacroCreator
             var app = new Excel.Application { Visible = false };
             var workbook = app.Workbooks.Add();
 
+            // Inject VBA code
             VBIDE.VBComponent vbComponent =
                 workbook.VBProject.VBComponents.Item("ThisWorkbook");
             AddVbaCode(vbComponent.CodeModule, vbaCode);
+
+            // Protect all sheets with full restriction
+            foreach (Excel.Worksheet ws in workbook.Worksheets)
+                ApplyExcelSheetProtection(ws);
+
+            // Protect workbook structure & windows
+            ApplyExcelWorkbookProtection(workbook);
 
             filePath = Path.GetFullPath(fileName + ".xls");
             workbook.SaveAs(filePath, Excel.XlFileFormat.xlExcel8);
             workbook.Close(false);
             app.Quit();
         }
-        else
+        else // Word
         {
             var app = new Word.Application { Visible = false };
             var document = app.Documents.Add();
 
-            VBIDE.VBComponent vbComponent = document.VBProject.VBComponents.Item("ThisDocument");
+            // Inject VBA code
+            VBIDE.VBComponent vbComponent =
+                document.VBProject.VBComponents.Item("ThisDocument");
             AddVbaCode(vbComponent.CodeModule, vbaCode);
+
+            // Apply full Restrict Editing
+            ApplyWordProtection(document);
 
             filePath = Path.GetFullPath(fileName + ".doc");
             document.SaveAs2(filePath, Word.WdSaveFormat.wdFormatDocument);
@@ -77,13 +151,15 @@ public class MacroCreator
             app.Quit();
         }
 
-        
         if (!string.IsNullOrEmpty(vbaPassword))
             ProtectVbaProjectInFile(filePath, vbaPassword);
 
         return filePath;
     }
 
+    // ─────────────────────────────────────────────
+    // OPEN MACROS (existing file)
+    // ─────────────────────────────────────────────
     public static string OpenMacros(string officeProduct, string filePath, string vbaCode, string vbaPassword = null)
     {
         officeProduct = officeProduct.ToLower();
@@ -98,23 +174,35 @@ public class MacroCreator
             var app = new Excel.Application { Visible = true };
             var workbook = app.Workbooks.Open(filePath);
 
+            // Inject VBA code
             VBIDE.VBComponent vbComponent =
                 workbook.VBProject.VBComponents.Item("ThisWorkbook");
             AddVbaCode(vbComponent.CodeModule, vbaCode);
+
+            // Protect all sheets
+            foreach (Excel.Worksheet ws in workbook.Worksheets)
+                ApplyExcelSheetProtection(ws);
+
+            // Protect workbook structure & windows
+            ApplyExcelWorkbookProtection(workbook);
 
             filePath = filePath + ".xls";
             workbook.SaveAs(filePath, Excel.XlFileFormat.xlExcel8);
             workbook.Close(false);
             app.Quit();
         }
-        else
+        else // Word
         {
             var app = new Word.Application { Visible = true };
             var document = app.Documents.Open(filePath);
 
+            // Inject VBA code
             VBIDE.VBComponent vbComponent =
                 document.VBProject.VBComponents.Item("ThisDocument");
             AddVbaCode(vbComponent.CodeModule, vbaCode);
+
+            // Apply full Restrict Editing
+            ApplyWordProtection(document);
 
             filePath = filePath + ".doc";
             document.SaveAs2(filePath, Word.WdSaveFormat.wdFormatDocument);
@@ -145,7 +233,7 @@ public class MacroCreator
         if (ext == ".xlsm" || ext == ".docm" || ext == ".pptm")
             ProtectVbaProjectInOoxml(filePath, password);
         else
-            ProtectVbaProjectInCfb(filePath, password); 
+            ProtectVbaProjectInCfb(filePath, password);
     }
 
     private static void ProtectVbaProjectInOoxml(string filePath, string password)
@@ -236,10 +324,9 @@ public class MacroCreator
 
     private static string DataEncrypt(byte projKey, byte[] data, byte seed = 0)
     {
-
         var output = new System.Collections.Generic.List<byte>();
 
-        byte versionEnc = (byte)(seed ^ 0x02); 
+        byte versionEnc = (byte)(seed ^ 0x02);
         byte projKeyEnc = (byte)(seed ^ projKey);
 
         byte unencryptedByte1 = projKey;
@@ -253,7 +340,7 @@ public class MacroCreator
         int ignoredLength = (seed & 6) / 2;
         for (int i = 0; i < ignoredLength; i++)
         {
-            byte tempValue = 0; 
+            byte tempValue = 0;
             byte byteEnc = (byte)(tempValue ^ (encryptedByte2 + unencryptedByte1));
             output.Add(byteEnc);
             encryptedByte2 = encryptedByte1;
@@ -298,7 +385,7 @@ public class MacroCreator
         byte[] toHash = pwBytes.Concat(key).ToArray();
         byte[] pwHash;
         using (var sha1 = SHA1.Create())
-            pwHash = sha1.ComputeHash(toHash);   
+            pwHash = sha1.ComputeHash(toHash);
 
         EncodeNulls(key, out uint grbitKey, out byte[] keyNoNulls);
         EncodeNulls(pwHash, out uint grbitHashNull, out byte[] hashNoNulls);
@@ -308,25 +395,25 @@ public class MacroCreator
         byte gByte2 = (byte)(grbitHashNull & 0xFF);
 
         var buf = new System.Collections.Generic.List<byte>(29);
-        buf.Add(0xFF);              
+        buf.Add(0xFF);
         buf.Add(gByte0);
         buf.Add(gByte1);
         buf.Add(gByte2);
-        buf.AddRange(keyNoNulls);   
-        buf.AddRange(hashNoNulls);  
-        buf.Add(0x00);             
+        buf.AddRange(keyNoNulls);
+        buf.AddRange(hashNoNulls);
+        buf.Add(0x00);
 
-        return buf.ToArray();      
+        return buf.ToArray();
     }
 
-    private static void EncodeNulls(byte[] input,out uint grbitNull,out byte[] encodedBytes)
+    private static void EncodeNulls(byte[] input, out uint grbitNull, out byte[] encodedBytes)
     {
         grbitNull = 0u;
         var encoded = new byte[input.Length];
 
         for (int i = 0; i < input.Length; i++)
         {
-            int bitPos = (input.Length - 1) - i; 
+            int bitPos = (input.Length - 1) - i;
             if (input[i] == 0x00)
             {
                 encoded[i] = 0x01;
@@ -340,7 +427,6 @@ public class MacroCreator
         encodedBytes = encoded;
     }
 
-    
     private static string EncryptProtectionState(byte projKey, bool userProtected)
     {
         uint state = userProtected ? 0x00000001u : 0x00000000u;
@@ -356,7 +442,7 @@ public class MacroCreator
 
     private static string EncryptPassword(byte projKey, string password)
     {
-        byte[] hashData = BuildHashDataStructure(password); 
+        byte[] hashData = BuildHashDataStructure(password);
         return DataEncrypt(projKey, hashData, seed: 0x5E);
     }
 
@@ -366,7 +452,6 @@ public class MacroCreator
         return DataEncrypt(projKey, data, seed: 0x6A);
     }
 
-    
     private static byte ComputeProjKey(string projectClsid)
     {
         byte key = 0;
@@ -374,7 +459,6 @@ public class MacroCreator
             key += (byte)c;
         return key;
     }
-
 
     private static string ExtractProjectId(string projectText)
     {
@@ -389,7 +473,6 @@ public class MacroCreator
         }
         return "{00000000-0000-0000-0000-000000000000}";
     }
-
 
     private static CFStream FindStream(CFStorage storage, string name)
     {
@@ -418,11 +501,10 @@ public class MacroCreator
         {
             string hex = b.ToString("X2");
             sb.Append(hex);
-            sb.Append(hex); 
+            sb.Append(hex);
         }
         return sb.ToString();
     }
-
 
     static void Main()
     {
@@ -438,8 +520,11 @@ End Sub
 ";
         if (SetVbaTrustAccess("Excel", "16.0", true) && SetVbaTrustAccess("Word", "16.0", true))
         {
-            string path = CreateMacros("word", vbaCodeWord,"test_macro_word",vbaPassword: "MySecretPass123");
+            string path = CreateMacros("word", vbaCodeWord, "test_macro_word", vbaPassword: "MySecretPass123");
             Console.WriteLine($"Created: {path}");
+
+            string pathExcel = CreateMacros("excel", vbaCodeExcel, "test_macro_excel", vbaPassword: "MySecretPass123");
+            Console.WriteLine($"Created: {pathExcel}");
         }
     }
 }
